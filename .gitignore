@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+
+# Dependencies (in case tooling gets added to a skill later)
+node_modules/
+__pycache__/
+*.pyc
