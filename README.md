@@ -11,10 +11,14 @@ Code, other agent frameworks, etc.) with little or no adaptation.
 skills/
 └── <skill-name>/
     └── <skill-name>.md   # the skill's instructions/prompt
+
+agents/
+└── <agent-name>/
+    └── <agent-name>.md   # the agent's frontmatter + system prompt
 ```
 
-Each skill lives in its own folder so it can grow (examples, templates,
-per-tool notes) without cluttering the top level.
+Each skill or agent lives in its own folder so it can grow (examples,
+templates, per-tool notes) without cluttering the top level.
 
 ## Skills
 
@@ -70,11 +74,41 @@ system/instruction prompt for any LLM-based agent. Based on the catalog at
 | [template-method](skills/template-method/template-method.md) | Defines an algorithm's skeleton in a base class, letting subclasses override specific steps without changing its structure. |
 | [visitor](skills/visitor/visitor.md) | Adds new operations to a stable class hierarchy without modifying it, via double dispatch through an `accept`/`Visitor` pair. |
 
+## Agents
+
+A three-role pipeline (Brain / Planner / Executor) for distributing work
+across separate, independently-trackable agent sessions inside
+[Herdr](https://herdr.dev) (a terminal multiplexer with built-in coding-agent
+awareness) plus Claude Code. Each role runs as its **own process in its own
+Herdr pane** rather than as a nested Claude Code subagent — a subagent
+(Agent tool) runs invisibly inside its caller's process, so Herdr can't see
+or manage it; giving each role its own pane makes it a real, trackable agent
+with its own state (`idle`/`working`/`blocked`/`done`).
+
+| Agent | Description | Origin / compatible tools |
+|-------|-------------|----------------------------|
+| [brain](agents/brain/brain.md) | Orchestrator. Creates/reuses a paired planner+executor in their own Herdr panes ("flow"), hands the planner its goal, tracks status until it settles, and resets both agents' context (`/clear`) between tasks so a reused flow doesn't accumulate unrelated history. | Claude Code custom subagent (`.claude/agents/`) launched as its own top-level session via `claude --agent brain`, driving the `herdr` CLI. |
+| [planner](agents/planner/planner.md) | Breaks a goal into concrete tasks and hands them directly to its paired executor (peer-to-peer, not relayed through Brain) once ready. | Same — `claude --agent planner`. |
+| [executor](agents/executor/executor.md) | Implements the concrete task it's handed; runs its own checks and installed skills (tests, `code-review`, `simplify`, etc.) before reporting back. | Same — `claude --agent executor`. |
+
+How the pieces fit together (the mechanics — pane/workspace creation, the
+`planner-<workspace_id>`/`executor-<workspace_id>` naming convention, the
+`/clear` cleanup step) are documented inline in each agent's own `.md`.
+
 ## Using a skill in Claude Code
 
 Copy the skill's `.md` file into `~/.claude/commands/<name>.md` (or
 `~/.claude/skills/`, depending on the skill format) to make it available as
 a slash command in any project.
+
+## Using an agent in Claude Code
+
+Copy the agent's `.md` file into `.claude/agents/<name>.md` in the target
+project (drop the `agents/<name>/` wrapper folder — Claude Code expects the
+files flat in `.claude/agents/`). Validate with `claude plugin validate
+.claude/agents`. To use all three together, copy `brain`, `planner`, and
+`executor` in as a set — they're designed to work as a trio, not
+standalone.
 
 ## Adding a new skill
 
@@ -82,3 +116,12 @@ a slash command in any project.
 2. Add the skill file(s), keeping the origin tool's format as-is.
 3. Add a row to the table above, noting what it does and which tools it's
    known to work with.
+
+## Adding a new agent
+
+1. Create `agents/<name>/`.
+2. Add `<name>.md` with the agent's frontmatter + system prompt, written to
+   be project-agnostic (no hardcoded project names, app details, or
+   project-specific tooling — those belong in the target project's own
+   `CLAUDE.md`, not in the portable agent definition).
+3. Add a row to the Agents table above.
