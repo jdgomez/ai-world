@@ -111,7 +111,7 @@ The agents reference two scripts from their frontmatter, under
 | File | Hook | What it does |
 |------|------|--------------|
 | [hooks/flow-status.sh](hooks/flow-status.sh) | `Stop`, `StopFailure` (executor, reviewer) | Writes the turn's completion line to `~/.cache/agent-flow/<workspace_id>/<role>.status`, so Brain reads one small file instead of the worker's pane. A turn killed by an API error is recorded as `BLOCKED reason=<error type>`. |
-| [hooks/usage-guard.py](hooks/usage-guard.py) | `PreToolUse` (all three) | Usage soft stop. At 85% of the account's usage quota it tells the agent once to wind down and save its state; at 95% it also denies tool calls that would start new work. Workers commit and report `BLOCKED reason=usage-limit`; Brain writes a checkpoint to `.claude/agent-flow/checkpoint.md` in the repo it runs in and resumes from it next session. Thresholds: `USAGE_SOFT_PCT` / `USAGE_HARD_PCT`. |
+| [hooks/usage-guard.py](hooks/usage-guard.py) | `PreToolUse` (all three) | Usage soft stop and Brain context rotation. At 85% of the account's usage quota (soft stop) it tells the agent once to start no new work and finish what is in flight up to a stable point (PR open or a human decision); at 95% (hard stop) it tells it to stop now and also denies tool calls that would start new work - workers then commit `WIP:` and report `BLOCKED reason=usage-limit`. Brain writes a checkpoint to `.claude/agent-flow/checkpoint.md` in the repo it runs in and resumes from it next session. For Brain only, it also reads the session's context size from its transcript and, past 150k tokens, tells it once to checkpoint and hand over to a fresh session (`/clear`). Thresholds: `USAGE_SOFT_PCT` / `USAGE_HARD_PCT` / `BRAIN_ROTATE_TOKENS`. |
 
 `usage-guard.py` reads `~/.cache/agent-flow/usage.json`. Claude Code hands
 quota data (`rate_limits`) only to the status line command, never to hooks,
@@ -124,10 +124,12 @@ behind a gateway with a spend limit).
 ### A note on hardcoded models
 
 Each agent's frontmatter currently pins a Claude model tier - `opus` for
-Brain, `sonnet` for Executor, `haiku` for Reviewer - chosen for how much
-judgment that role's task needs: Brain plans and makes orchestration calls,
+Brain, `sonnet` for Executor and Reviewer - chosen for how much judgment
+that role's task needs: Brain plans and makes orchestration calls,
 Executor implements well-specified tasks, Reviewer mostly drives an
-external CLI/skill and relays its findings.
+external CLI/skill and relays its findings. The Reviewer ran on `haiku`
+at first; it is on `sonnet` as a trial, because `haiku` kept stopping on
+permission prompts and slips in its shell commands.
 
 This is a known rough edge for a repo meant to be tool-agnostic: those tier
 names, and the assumption that "a light/medium/heavy tier" maps cleanly

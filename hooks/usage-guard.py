@@ -4,13 +4,20 @@
 Gives agents a controlled stop before the account's usage quota runs out.
 Reads ${XDG_CACHE_HOME:-~/.cache}/agent-flow/usage.json, which the status line
 (~/.claude/statusline.js) keeps up to date, and:
-  - at the soft threshold, tells the agent once to wind down (see the
-    "Usage soft stop" section of each agent definition);
-  - at the hard threshold, also denies tool calls that would start new work,
-    while still allowing the ones needed to save state.
+  - at the soft threshold, tells the agent once to start no new work and
+    finish what is in flight (see the "Usage soft stop" section of each
+    agent definition);
+  - at the hard threshold, tells it once to stop now, and denies tool calls
+    that would start new work, while still allowing the ones needed to save
+    state.
+
+For brain only, it also watches the session's own context size (read from
+the transcript) and tells it once to rotate to a fresh session past
+BRAIN_ROTATE_TOKENS (see the "Context rotation" section of brain.md).
 
 Usage (from agent frontmatter): usage-guard.py <role>
-Thresholds can be overridden with USAGE_SOFT_PCT / USAGE_HARD_PCT.
+Thresholds can be overridden with USAGE_SOFT_PCT / USAGE_HARD_PCT /
+BRAIN_ROTATE_TOKENS.
 """
 import json
 import os
@@ -21,6 +28,8 @@ from pathlib import Path
 
 SOFT_PCT = float(os.environ.get("USAGE_SOFT_PCT", 85))
 HARD_PCT = float(os.environ.get("USAGE_HARD_PCT", 95))
+BRAIN_ROTATE_TOKENS = int(os.environ.get("BRAIN_ROTATE_TOKENS", 150_000))
+TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024
 WINDOW_LABELS = {"five_hour": "5-hour", "seven_day": "weekly", "spend_limit": "spend"}
 MARKER_MAX_AGE_S = 8 * 24 * 3600
 
@@ -61,23 +70,55 @@ def first_time(marker):
     return True
 
 
-def main():
-    role = sys.argv[1] if len(sys.argv) > 1 else ""
-    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "agent-flow"
-    usage = json.loads((cache / "usage.json").read_text())
-    event = json.load(sys.stdin)
+def context_tokens(transcript_path):
+    """Context size of the session's latest main-chain call, from its transcript."""
+    with open(transcript_path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - TRANSCRIPT_TAIL_BYTES))
+        lines = f.read().splitlines()
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        usage = (entry.get("message") or {}).get("usage") if isinstance(entry, dict) else None
+        if entry.get("type") == "assistant" and not entry.get("isSidechain") and usage:
+            return sum(usage.get(k) or 0 for k in (
+                "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+    return 0
 
+
+def rotation_notice(event, cache):
+    """One-time context rotation notice for brain, or None."""
+    transcript = event.get("transcript_path")
+    if not transcript:
+        return None
+    tokens = context_tokens(transcript)
+    if tokens < BRAIN_ROTATE_TOKENS:
+        return None
+    if not first_time(cache / "usage-notified" / f"{event.get('session_id', 'unknown')}.rotate"):
+        return None
+    return (
+        f"Context rotation: this session's context is {tokens // 1000}k tokens "
+        f"(threshold {BRAIN_ROTATE_TOKENS // 1000}k). Follow the \"Context rotation\" "
+        "section of your instructions: checkpoint and hand over to a fresh session."
+    )
+
+
+def usage_output(role, event, cache):
+    """hookSpecificOutput fields for the usage quota, or {}."""
+    usage = json.loads((cache / "usage.json").read_text())
     now = time.time()
     worst = worst_window(usage.get("rate_limits") or {}, now)
     if worst is None or worst[1] < SOFT_PCT:
-        return
+        return {}
     key, pct, resets_at = worst
     level = "hard" if pct >= HARD_PCT else "soft"
     label = WINDOW_LABELS.get(key, key)
     resets = time.strftime("%Y-%m-%d %H:%M", time.localtime(resets_at)) if resets_at else "unknown"
     status = f"Usage limit: {pct:.0f}% of the {label} quota is used (resets {resets})."
 
-    output = {"hookEventName": "PreToolUse"}
+    output = {}
 
     if level == "hard":
         tool = event.get("tool_name", "")
@@ -96,17 +137,39 @@ def main():
     marker = cache / "usage-notified" / f"{event.get('session_id', 'unknown')}.{level}.{key}.{int(resets_at or 0)}"
     if first_time(marker):
         urgency = (
-            "Stop now: save your state and end your turn."
+            "Hard stop: stop now, save your state and end your turn."
             if level == "hard"
-            else "Start winding down: bring the current step to a safe point, save your state and end your turn."
+            else "Soft stop: start no new work, but finish what is already in progress up to a stable point."
         )
         output["additionalContext"] = (
             f'{status} {urgency} Follow the "Usage soft stop" section of your instructions. '
             f"Do not start new work until the quota resets at {resets}."
         )
+    return output
 
-    if len(output) > 1:
-        print(json.dumps({"hookSpecificOutput": output}))
+
+def main():
+    role = sys.argv[1] if len(sys.argv) > 1 else ""
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "agent-flow"
+    event = json.load(sys.stdin)
+
+    output = {}
+    try:
+        output = usage_output(role, event, cache)
+    except Exception:
+        pass  # a missing or bad usage.json must not stop the context check
+
+    if role == "brain":
+        try:
+            notice = rotation_notice(event, cache)
+        except Exception:
+            notice = None
+        if notice:
+            context = output.get("additionalContext")
+            output["additionalContext"] = f"{context}\n{notice}" if context else notice
+
+    if output:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", **output}}))
 
 
 if __name__ == "__main__":
