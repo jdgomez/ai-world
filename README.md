@@ -29,7 +29,9 @@ templates, per-tool notes) without cluttering the top level.
 
 | Skill | Description | Origin / compatible tools |
 |-------|-------------|----------------------------|
-| [session0](skills/session0/session0.md) | Runs a "Session 0" — a structured project-inception conversation (problem, users, vision, scope, glossary, phases) before any code is written. Produces a `SESSION0.md` document. | Written as a Claude Code slash command (`/session0`), but the instructions are plain prose and portable to any LLM-based agent as a system/instruction prompt. |
+| [session0](skills/session0/session0.md) | Runs a "Session 0" — a structured project-inception conversation (problem, users, vision, scope, glossary, phases, development methodology) before any code is written. Produces a `SESSION0.md` document. | Written as a Claude Code slash command (`/session0`), but the instructions are plain prose and portable to any LLM-based agent as a system/instruction prompt. |
+| [tdd-plan](skills/tdd-plan/SKILL.md) | Plans one milestone of a test-driven project as vertical slices with the owner and writes the milestone plan file. The first plan polishes the "golden slice" (thinnest end-to-end path plus its test seams) that every later slice imitates. Planning only. Adapted from ideas in [mattpocock/skills](https://github.com/mattpocock/skills) (MIT) and [citypaul/.dotfiles](https://github.com/citypaul/.dotfiles). | Claude Code skill (`~/.claude/skills/tdd-plan/`); plain prose, portable as an instruction prompt. Used by `brain` in projects on the TDD methodology. |
+| [tdd](skills/tdd/SKILL.md) | The rules of the test-driven loop (red -> green -> refactor, one behavior at a time), what a good test is (public seams, independent expected values) and the anti-patterns (implementation-coupled, tautological, horizontal, weakened tests). Working reference of `tdd-executor`, yardstick of `tdd-reviewer`. Adapted from ideas in [mattpocock/skills](https://github.com/mattpocock/skills) (MIT). | Claude Code skill (`~/.claude/skills/tdd/`). The personas invoke it at the start of their first task: frontmatter `skills:` preload does not apply to a top-level `--agent` session. |
 
 ### Design patterns (Gang of Four)
 
@@ -92,11 +94,28 @@ makes it a real, trackable agent with its own state
 It is hub-and-spoke: Brain is the only agent that talks to the user, plans,
 and hands work to anyone. Executor and reviewer never talk to each other.
 
+Executor and reviewer are fixed **roles**; each comes in one **persona** per
+development methodology. Brain reads the project's methodology (decided in
+Session 0 and recorded in the repo) and starts the matching pair:
+`sdd-*` for Spec Driven Development (OpenSpec + `no-mistakes`, larger or
+team projects) and `tdd-*` for Test Driven Development (one polished
+vertical slice, then growth; personal projects).
+
+Each persona also ships a `settings.json` with its own permission rules
+(what the role needs, and the commands it must never run), installed as
+`~/.claude/personas/<persona>.json` and passed with `--settings` when Brain
+starts the worker. Agent frontmatter can't hold allow/deny rules, and
+permission lists merge across settings scopes with deny always winning, so
+a persona file adds rules on top of the user and project settings and its
+denies hold whatever those allow.
+
 | Agent | Description | Origin / compatible tools |
 |-------|-------------|----------------------------|
 | [brain](agents/brain/brain.md) | Single orchestrator. Plans with the user up front (`session0`, `openspec-propose`), gives each change its own "flow" - a Herdr workspace on its own git worktree and branch - and dispatches the work itself: task to the executor, its committed result to a reviewer started on demand, findings back to the executor. Escalates human-judgment calls to the user. Several flows can run in parallel. | Claude Code custom subagent launched as its own top-level session via `claude --agent brain`, driving the `herdr` CLI. |
-| [executor](agents/executor/executor.md) | Implements the concrete task Brain hands it, runs its own checks and installed skills (`simplify`, etc.), and commits on the flow's branch. Never pushes and does not drive review. | Same - `claude --agent executor`. |
-| [reviewer](agents/reviewer/reviewer.md) | Validates committed work handed to it by Brain - drives whatever review gate/skills the project has configured (e.g. `no-mistakes`, `code-review`) and escalates human-judgment findings to Brain instead of deciding them itself. | Same - `claude --agent reviewer`. |
+| [sdd-executor](agents/sdd-executor/sdd-executor.md) | Executor persona for **Spec Driven Development** projects (OpenSpec specs in the repo, `no-mistakes` gate). Implements the task Brain hands it - via `openspec-apply-change` for OpenSpec changes - runs its own checks and installed skills (`simplify`, etc.), and commits on the flow's branch. Never pushes and does not drive review. | Same - `claude --agent sdd-executor --settings ~/.claude/personas/sdd-executor.json`. |
+| [sdd-reviewer](agents/sdd-reviewer/sdd-reviewer.md) | Reviewer persona for **Spec Driven Development** projects. Drives the `no-mistakes` gate end to end (part of this persona) plus any review skill Brain names, and escalates human-judgment findings to Brain instead of deciding them itself. Read-only on the repo and on GitHub. | Same - `claude --agent sdd-reviewer --settings ~/.claude/personas/sdd-reviewer.json`. |
+| [tdd-executor](agents/tdd-executor/tdd-executor.md) | Executor persona for **Test Driven Development** projects (milestone plan files with vertical slices, no OpenSpec, no gate). Builds the slice test-first with the `tdd` skill, ticks the plan's criteria, runs the full checks, pushes its branch and opens the pull request. Never force-pushes, merges or closes pull requests. | Same - `claude --agent tdd-executor --settings ~/.claude/personas/tdd-executor.json`. |
+| [tdd-reviewer](agents/tdd-reviewer/tdd-reviewer.md) | Reviewer persona for **Test Driven Development** projects. Verifies instead of trusting: reruns tests and checks, proves the new tests were red without the change (`scripts/tdd-red-check.sh`), checks test integrity and quality, criteria, scope, code quality against the project's rules, the PR text and CI. Read-only on the repo and on GitHub; findings go to Brain only. | Same - `claude --agent tdd-reviewer --settings ~/.claude/personas/tdd-reviewer.json`. |
 
 The mechanics (worktree-backed flows, the
 `executor-<workspace_id>`/`reviewer-<workspace_id>` naming convention, the
@@ -156,12 +175,16 @@ project without a per-project copy step. Validate with `claude plugin
 validate ~/.claude/agents`. A copy in a specific project's own
 `.claude/agents/<name>.md` still works and takes precedence there, for when
 you need to override a role for one project only - but the default is user
-level. To use the full pipeline, install `brain`, `executor`, and
-`reviewer` together - they're designed to work as a set, not standalone -
+level. To use the full pipeline, install `brain` and the executor/reviewer
+personas together - they're designed to work as a set, not standalone -
 plus what they depend on:
 
 ```
 cp agents/*/*.md ~/.claude/agents/
+mkdir -p ~/.claude/skills && cp -r skills/tdd skills/tdd-plan ~/.claude/skills/
+mkdir -p ~/.claude/scripts && cp scripts/* ~/.claude/scripts/ && chmod +x ~/.claude/scripts/*
+ln -sf ~/.claude/scripts/pr-tutor.sh ~/.local/bin/pr-tutor   # optional private study aid, see scripts/pr-tutor.sh
+mkdir -p ~/.claude/personas && for d in agents/*/; do n=$(basename "$d"); [ -f "$d/settings.json" ] && cp "$d/settings.json" ~/.claude/personas/$n.json; done
 mkdir -p ~/.claude/hooks && cp hooks/* ~/.claude/hooks/ && chmod +x ~/.claude/hooks/*
 cp statusline/statusline.js ~/.claude/statusline.js
 ```
