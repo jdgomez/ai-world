@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git switch *)",
+      "Bash(git checkout -b *)",
+      "Bash(git restore *)",
+      "Bash(git stash *)",
+      "Bash(git fetch *)",
+      "Bash(git show *)",
+      "Bash(git push -u origin *)",
+      "Bash(git push origin *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh run view *)",
+      "Bash(gh run list *)",
+      "Bash(gh run download *)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue list *)",
+      "WebSearch"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * +*)",
+      "Bash(git push --delete *)",
+      "Bash(git push * --delete *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr close *)",
+      "Bash(gh pr review *)",
+      "Bash(gh release *)",
+      "Bash(gh repo delete *)"
+    ]
+  }
+}

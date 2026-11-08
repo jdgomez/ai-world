@@ -61,6 +61,24 @@ Only once scope is clear:
 - What comes after the MVP?
 - Is there a long-term vision even if it's not on the immediate roadmap?
 
+### Block 8 - Way of working (methodology)
+Only once phases are clear. Pick the development methodology the agent
+pipeline will follow; it decides which executor/reviewer personas work on
+the project, so it is recorded and not revisited lightly:
+- **SDD - Spec Driven Development:** larger projects, maybe commercial,
+  several people or stakeholders who state requirements. Specs live in the
+  repository (OpenSpec) so anyone can read them and see their state, and
+  every change goes through a deployment-style gate (`no-mistakes`).
+  Personas: `sdd-executor` / `sdd-reviewer`.
+- **TDD - Test Driven Development:** personal projects with no team
+  coordination and no stakeholder writing specs. Start from one polished
+  vertical slice protected by many small unit tests and grow from there,
+  planned as milestone plans of vertical slices. Personas: `tdd-executor` /
+  `tdd-reviewer`.
+Ask who will work on the project and who states the requirements, then give
+your recommendation and why. Changing the methodology later is allowed but
+rare: it must be an explicit decision by the owner.
+
 ---
 
 ## Output document: SESSION0.md
@@ -105,6 +123,10 @@ _Date: [today's date]_
 [Description.]
 
 _(later phases if any)_
+
+## Way of working
+Methodology: [SDD or TDD] - [one line on why]. Agent personas:
+[sdd-executor / sdd-reviewer, or tdd-executor / tdd-reviewer].
 
 ## Constraints and technical decisions
 [Decisions already made and why. Environment constraints.]
